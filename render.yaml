@@ -7,7 +7,7 @@ services:
     autoDeployTrigger: commit
     envVars:
       - key: VITE_API_URL
-        value: https://squashcode-studio-backend.onrender.com/api
+        value: https://api.squashcode-studio.7sc.in/api
     routes:
       - type: rewrite
         source: /*

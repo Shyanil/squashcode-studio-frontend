@@ -27,7 +27,7 @@ This repository includes `render.yaml` so Render creates a Static Site with:
 
 The Render config sets:
 
-- `VITE_API_URL=https://squashcode-studio-backend.onrender.com/api`
+- `VITE_API_URL=https://api.squashcode-studio.7sc.in/api`
 
 For local development, keep `.env` pointed at your local backend:
 
