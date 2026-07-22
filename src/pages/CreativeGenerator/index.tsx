@@ -643,7 +643,9 @@ export default function CreativeGeneratorPage() {
               label="Optional generation note"
               placeholder={
                 selectedPromptGeneration
-                  ? 'Optional: add one extra instruction. The selected JSON and its saved reference image are used automatically.'
+                  ? selectedPromptGeneration.referenceImageUrl
+                    ? 'Optional: add one extra instruction. The selected JSON and its saved reference image are used automatically.'
+                    : 'Optional: add one extra instruction. The selected JSON is used automatically.'
                   : 'Select a generated JSON, or enter a short prompt for manual generation.'
               }
               value={prompt}
@@ -694,7 +696,11 @@ export default function CreativeGeneratorPage() {
                         <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 truncate">
                           {promptGenerationDisplayTitle(selectedPromptGeneration)}
                         </p>
-                        <p className="text-[10px] text-slate-400">Sent to OpenAI image-to-image API</p>
+                        <p className="text-[10px] text-slate-400">
+                          {selectedPromptGeneration.referenceImageUrl
+                            ? 'Reference image and JSON sent to OpenAI'
+                            : 'JSON-only prompt sent to OpenAI'}
+                        </p>
                       </div>
                     </div>
                   </div>

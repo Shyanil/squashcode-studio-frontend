@@ -14,9 +14,10 @@ import {
   Upload,
 } from '@/components/ui';
 import { cn } from '@/utils/cn';
-import { creativeDisplayTitle } from '@/utils/creativeDisplay';
+import { creativeDisplayTitle, promptGenerationDisplayTitle } from '@/utils/creativeDisplay';
 import {
   promptService,
+  type PromptGeneration,
   type PromptMessage,
   type PromptSession,
   type PromptSourceType,
@@ -105,6 +106,25 @@ function compactContext(context: Record<string, unknown>) {
   }, {});
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function generationCreativeContext(generation: PromptGeneration) {
+  const snapshot = generation.promptMetadata.creativeContextSnapshot;
+  return isRecord(snapshot) ? snapshot : {};
+}
+
+function localSavedJsonName(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    const title = isRecord(parsed) && typeof parsed.title === 'string' ? parsed.title : '';
+    return creativeDisplayTitle(title);
+  } catch {
+    return 'Saved JSON';
+  }
+}
+
 function displayError(error: unknown) {
   if (typeof error === 'object' && error !== null) {
     const record = error as {
@@ -166,6 +186,7 @@ export default function PromptGeneratorPage() {
   const activeAnalyzeSignatureRef = useRef<string | null>(null);
   const isSendingRef = useRef(false);
   const isGeneratingRef = useRef(false);
+  const hasUserStartedRef = useRef(false);
 
   const updateStatus = (text: string, kind: StatusKind = 'info') => {
     setStatusText(text);
@@ -208,6 +229,53 @@ export default function PromptGeneratorPage() {
 
     return () => URL.revokeObjectURL(nextPreviewUrl);
   }, [selectedFile]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreLocalSavedJson = () => {
+      const savedJson = window.localStorage.getItem(savedPromptKey);
+
+      if (!savedJson || hasUserStartedRef.current || cancelled) {
+        return;
+      }
+
+      setGeneratedJson(savedJson);
+      setJsonName(localSavedJsonName(savedJson));
+      setSaved(true);
+      setStatusText('Loaded locally saved JSON');
+      setStatusKind('success');
+    };
+
+    promptService
+      .listGenerations()
+      .then((response) => {
+        if (cancelled || hasUserStartedRef.current) {
+          return;
+        }
+
+        const latestGeneration = response.data.data?.[0];
+
+        if (!latestGeneration) {
+          restoreLocalSavedJson();
+          return;
+        }
+
+        setGeneratedJson(JSON.stringify(latestGeneration.generatedJson, null, 2));
+        setJsonName(promptGenerationDisplayTitle(latestGeneration));
+        setCreativeContext(generationCreativeContext(latestGeneration));
+        setSaved(true);
+        setStatusText(`Loaded saved JSON v${latestGeneration.versionNumber}`);
+        setStatusKind('success');
+      })
+      .catch(() => {
+        restoreLocalSavedJson();
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const syncSessionName = async (workingSession: PromptSession) => {
     const requestedName = jsonName.trim();
@@ -306,6 +374,7 @@ export default function PromptGeneratorPage() {
   };
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    hasUserStartedRef.current = true;
     const nextFile = event.target.files?.[0] ?? null;
     setSelectedFile(nextFile);
 
@@ -372,6 +441,7 @@ export default function PromptGeneratorPage() {
   };
 
   const handleAdditionalFilesChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    hasUserStartedRef.current = true;
     const files = Array.from(event.target.files ?? []);
     event.target.value = '';
 
@@ -426,6 +496,7 @@ export default function PromptGeneratorPage() {
     }
 
     isGeneratingRef.current = true;
+    hasUserStartedRef.current = true;
     setIsGenerating(true);
     updateStatus('Generating JSON...', 'info');
 
@@ -516,7 +587,10 @@ export default function PromptGeneratorPage() {
               label="JSON name"
               placeholder="Example: Trust-led healthcare offer"
               value={jsonName}
-              onChange={(event) => setJsonName(event.target.value)}
+              onChange={(event) => {
+                hasUserStartedRef.current = true;
+                setJsonName(event.target.value);
+              }}
             />
 
             <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
@@ -681,7 +755,10 @@ export default function PromptGeneratorPage() {
               <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <Textarea
                   className="min-h-24 border-0 bg-slate-50 focus:border-0 dark:bg-slate-950"
-                  onChange={(event) => setPromptText(event.target.value)}
+                  onChange={(event) => {
+                    hasUserStartedRef.current = true;
+                    setPromptText(event.target.value);
+                  }}
                   placeholder="Tell the assistant what to generate, what to keep from the image, or what to improve..."
                   value={promptText}
                 />
