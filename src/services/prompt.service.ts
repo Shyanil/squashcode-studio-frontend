@@ -146,5 +146,14 @@ export const promptService = {
   enhance: (payload: { sessionId?: string; content: string }) =>
     apiClient.post<ApiResponse<PromptSendMessageResult | null>>('/prompt/enhance', payload),
 
-  listGenerations: () => apiClient.get<ApiResponse<PromptGeneration[]>>('/prompt/generations'),
+  listGenerations: () =>
+    apiClient.get<ApiResponse<PromptGeneration[]>>('/prompt/generations', {
+      headers: {
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      params: {
+        _: Date.now(),
+      },
+    }),
 };
