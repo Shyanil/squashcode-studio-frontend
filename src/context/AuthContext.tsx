@@ -9,12 +9,19 @@ import { supabaseClient } from '@/services/supabaseClient';
 
 function authRedirectUrl() {
   const configuredUrl = import.meta.env.VITE_AUTH_REDIRECT_URL as string | undefined;
+  const currentRedirectUrl = `${window.location.origin}/creative-generator`;
+  const isLocalHost =
+    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+  if (import.meta.env.PROD && !isLocalHost) {
+    return currentRedirectUrl;
+  }
 
   if (configuredUrl?.trim()) {
     return configuredUrl;
   }
 
-  return `${window.location.origin}/creative-generator`;
+  return currentRedirectUrl;
 }
 
 function mapSupabaseUser(user: User): AuthUser {
