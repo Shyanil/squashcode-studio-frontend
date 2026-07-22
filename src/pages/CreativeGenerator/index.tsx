@@ -633,7 +633,7 @@ export default function CreativeGeneratorPage() {
           <CardContent className="space-y-5">
             <Input
               label="Creative name"
-              placeholder="Example: Trust-led healthcare square ad"
+              placeholder="Example: Premium property square ad"
               value={creativeName}
               onChange={(event) => setCreativeName(event.target.value)}
             />

@@ -29,6 +29,13 @@ function errorMessage(error: unknown) {
   return 'Unable to complete authentication. Please try again.';
 }
 
+function isSignupConfirmationCallback() {
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const queryParams = new URLSearchParams(window.location.search);
+
+  return hashParams.get('type') === 'signup' || queryParams.get('type') === 'signup';
+}
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -53,6 +60,12 @@ export default function LoginPage() {
   });
 
   useEffect(() => {
+    if (isSignupConfirmationCallback()) {
+      setMode('signin');
+      setNotice('Email confirmed. Sign in to continue.');
+      return;
+    }
+
     if (isAuthenticated) {
       navigate(routePaths.creativeGenerator, { replace: true });
     }
@@ -182,7 +195,6 @@ export default function LoginPage() {
                 autoComplete="name"
                 error={errors.name?.message}
                 label="User name"
-                placeholder="Shyanil Mishra"
                 type="text"
                 {...register('name')}
               />
@@ -191,7 +203,6 @@ export default function LoginPage() {
               autoComplete="email"
               error={errors.email?.message}
               label="Email"
-              placeholder="name@squashcode.com"
               type="email"
               {...register('email')}
             />

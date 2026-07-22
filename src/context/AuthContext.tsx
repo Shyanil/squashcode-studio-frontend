@@ -9,7 +9,7 @@ import { supabaseClient } from '@/services/supabaseClient';
 
 function authRedirectUrl() {
   const configuredUrl = import.meta.env.VITE_AUTH_REDIRECT_URL as string | undefined;
-  const currentRedirectUrl = `${window.location.origin}/creative-generator`;
+  const currentRedirectUrl = `${window.location.origin}/login`;
   const isLocalHost =
     window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
