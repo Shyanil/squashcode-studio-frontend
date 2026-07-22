@@ -9,10 +9,12 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Input,
   Textarea,
   Upload,
 } from '@/components/ui';
 import { cn } from '@/utils/cn';
+import { creativeDisplayTitle } from '@/utils/creativeDisplay';
 import {
   promptService,
   type PromptMessage,
@@ -147,6 +149,7 @@ const statusDotStyles: Record<StatusKind, string> = {
 export default function PromptGeneratorPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [jsonName, setJsonName] = useState('');
   const [promptText, setPromptText] = useState('');
   const [generatedJson, setGeneratedJson] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>(starterMessages);
@@ -206,13 +209,30 @@ export default function PromptGeneratorPage() {
     return () => URL.revokeObjectURL(nextPreviewUrl);
   }, [selectedFile]);
 
+  const syncSessionName = async (workingSession: PromptSession) => {
+    const requestedName = jsonName.trim();
+
+    if (!requestedName || creativeDisplayTitle(workingSession.title) === creativeDisplayTitle(requestedName)) {
+      return workingSession;
+    }
+
+    const response = await promptService.updateSession(workingSession.id, {
+      title: requestedName,
+    });
+    const updatedSession = response.data.data;
+    setSession(updatedSession);
+    setCreativeContext(updatedSession.creativeContext);
+
+    return updatedSession;
+  };
+
   const ensureSession = async (sourceType: PromptSourceType) => {
     if (session) {
-      return session;
+      return syncSessionName(session);
     }
 
     const response = await promptService.createSession({
-      title: 'JSON Prompt Generator Session',
+      title: jsonName.trim() || undefined,
       sourceType,
     });
     const detail = response.data.data;
@@ -432,6 +452,9 @@ export default function PromptGeneratorPage() {
       const nextJson = JSON.stringify(result.generation.generatedJson, null, 2);
 
       setSession(result.session);
+      if (!jsonName.trim()) {
+        setJsonName(result.session.title);
+      }
       setCreativeContext(result.session.creativeContext);
       setGeneratedJson(nextJson);
       setSaved(true);
@@ -489,6 +512,13 @@ export default function PromptGeneratorPage() {
           </CardHeader>
 
           <CardContent className="space-y-5">
+            <Input
+              label="JSON name"
+              placeholder="Example: Trust-led healthcare offer"
+              value={jsonName}
+              onChange={(event) => setJsonName(event.target.value)}
+            />
+
             <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
               <Upload
                 accept="image/*"
@@ -691,7 +721,7 @@ export default function PromptGeneratorPage() {
                   />
                   <span>
                     {statusText}
-                    {session ? ` · session ${session.id.slice(0, 8)}` : ''}
+                    {session ? ` · ${creativeDisplayTitle(session.title)}` : ''}
                   </span>
                 </div>
               </div>
@@ -711,7 +741,7 @@ export default function PromptGeneratorPage() {
                 </div>
                 <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                   {statusText}
-                  {session ? ` · session ${session.id.slice(0, 8)}` : ''}
+                  {session ? ` · ${creativeDisplayTitle(session.title)}` : ''}
                   {saved ? ' · saved' : ''}
                 </p>
               </div>

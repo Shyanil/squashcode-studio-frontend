@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 
 import type { MockCreative } from '@/constants/mockData';
@@ -29,21 +30,25 @@ export function MockVisual({
   variant = 'mint',
   imageUrl,
 }: MockVisualProps) {
+  const [imageError, setImageError] = useState(false);
+  const showImage = Boolean(imageUrl && !imageError);
+
   return (
     <div
       className={cn(
         'relative overflow-hidden rounded-lg bg-gradient-to-br p-4',
-        imageUrl && 'bg-slate-950 p-0',
+        showImage && 'bg-slate-950 p-0',
         aspect,
         variantStyles[variant],
         className,
       )}
     >
-      {imageUrl ? (
+      {showImage ? (
         <img
           alt={title}
           className="absolute inset-0 z-0 h-full w-full object-contain"
           src={imageUrl}
+          onError={() => setImageError(true)}
         />
       ) : (
         <>
@@ -51,7 +56,7 @@ export function MockVisual({
           <div className="absolute -bottom-10 left-8 h-32 w-32 rounded-full bg-slate-950/10 blur-md" />
         </>
       )}
-      {!imageUrl ? (
+      {!showImage ? (
         <div className="relative z-10 flex h-full flex-col justify-between rounded-lg border border-white/40 bg-white/35 p-4 shadow-lg backdrop-blur-md">
           <div className="flex items-center justify-between gap-3">
             <span className="rounded-full bg-white/70 px-3 py-1 text-xs font-semibold text-slate-800 shadow-sm">

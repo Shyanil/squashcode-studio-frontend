@@ -1,6 +1,7 @@
 export { Badge } from './Badge';
 export { DonutChart, MiniBarChart, MiniLineChart } from './Charts';
 export { ConfirmationDialog } from './ConfirmationDialog';
+export { ComingSoonPage } from './ComingSoonPage';
 export { EmptyState } from './EmptyState';
 export { ImageCard } from './ImageCard';
 export { MetricCard } from './MetricCard';

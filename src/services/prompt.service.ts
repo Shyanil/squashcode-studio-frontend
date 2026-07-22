@@ -106,6 +106,9 @@ export const promptService = {
   getSession: (sessionId: string) =>
     apiClient.get<ApiResponse<PromptSessionDetail>>(`/prompt/sessions/${sessionId}`),
 
+  updateSession: (sessionId: string, payload: { title: string }) =>
+    apiClient.patch<ApiResponse<PromptSession>>(`/prompt/sessions/${sessionId}`, payload),
+
   analyzeImage: (sessionId: string, payload: { image: PromptUploadedImage; promptText?: string }) =>
     apiClient.post<ApiResponse<PromptAnalyzeImageResult>>(
       `/prompt/sessions/${sessionId}/image`,

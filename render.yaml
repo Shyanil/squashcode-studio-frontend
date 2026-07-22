@@ -8,6 +8,12 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://api.squashcode-studio.7sc.in/api
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_AUTH_REDIRECT_URL
+        value: https://squashcode-studio.7sc.in/creative-generator
     routes:
       - type: rewrite
         source: /*

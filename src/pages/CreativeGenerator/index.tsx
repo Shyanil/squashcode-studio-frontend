@@ -22,12 +22,19 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Input,
   Select,
   Textarea,
 } from '@/components/ui';
+import { CreativeLearningPanel } from '@/components/creative/CreativeLearningPanel';
 import { promptService, type PromptGeneration } from '@/services/prompt.service';
-import { creativeService, type CreativeItem } from '@/services/creative.service';
+import {
+  creativeService,
+  type CreativeFeedbackSignalType,
+  type CreativeItem,
+} from '@/services/creative.service';
 import { cn } from '@/utils/cn';
+import { creativeDisplayTitle, promptGenerationDisplayTitle } from '@/utils/creativeDisplay';
 
 const aspectMap: Record<string, string> = {
   '1:1': 'aspect-square',
@@ -64,8 +71,9 @@ function promptGenerationLabel(generation: PromptGeneration) {
     ? 'saved JSON'
     : createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const referenceLabel = generation.referenceImageUrl ? ' · reference' : '';
+  const title = promptGenerationDisplayTitle(generation);
 
-  return `JSON v${generation.versionNumber} · ${dateLabel}${referenceLabel}`;
+  return `${title} · v${generation.versionNumber} · ${dateLabel}${referenceLabel}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -89,12 +97,18 @@ function errorMessage(error: unknown, fallback: string) {
 }
 
 export default function CreativeGeneratorPage() {
+  const [creativeName, setCreativeName] = useState('');
   const [prompt, setPrompt] = useState('');
   const [jsonPreset, setJsonPreset] = useState('');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [quality, setQuality] = useState('standard');
   const [imageCount, setImageCount] = useState('1');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoadingCreatives, setIsLoadingCreatives] = useState(true);
+  const [creativesLoadError, setCreativesLoadError] = useState<string | null>(null);
+  const [promptGenerationsLoadError, setPromptGenerationsLoadError] = useState<string | null>(
+    null,
+  );
   const [creatives, setCreatives] = useState<CreativeItem[]>([]);
   const [previewCreative, setPreviewCreative] = useState<CreativeItem | null>(null);
   const [promptGenerations, setPromptGenerations] = useState<PromptGeneration[]>([]);
@@ -117,6 +131,8 @@ export default function CreativeGeneratorPage() {
 
   useEffect(() => {
     // Load generated creatives from database
+    setIsLoadingCreatives(true);
+    setCreativesLoadError(null);
     creativeService
       .list()
       .then((res) => {
@@ -124,9 +140,14 @@ export default function CreativeGeneratorPage() {
           setCreatives(res.data.data);
         }
       })
-      .catch((err) => console.error('Failed to load creatives:', err));
+      .catch((err: unknown) => {
+        console.error('Failed to load creatives:', err);
+        setCreativesLoadError(errorMessage(err, 'Failed to load generated creatives.'));
+      })
+      .finally(() => setIsLoadingCreatives(false));
 
     // Load prompt generations from Supabase (interlinking)
+    setPromptGenerationsLoadError(null);
     promptService
       .listGenerations()
       .then((res) => {
@@ -134,7 +155,10 @@ export default function CreativeGeneratorPage() {
           setPromptGenerations(res.data.data);
         }
       })
-      .catch((err) => console.error('Failed to load prompt generations:', err));
+      .catch((err: unknown) => {
+        console.error('Failed to load prompt generations:', err);
+        setPromptGenerationsLoadError(errorMessage(err, 'Failed to load saved JSON presets.'));
+      });
   }, []);
 
   useEffect(() => {
@@ -162,6 +186,7 @@ export default function CreativeGeneratorPage() {
     creativeService
       .generate({
         title,
+        creativeName: creativeName.trim() || undefined,
         aspectRatio,
         quality,
         imageCount: parseInt(imageCount, 10),
@@ -206,6 +231,7 @@ export default function CreativeGeneratorPage() {
     creativeService
       .generate({
         title,
+        creativeName: creativeName.trim() || undefined,
         aspectRatio,
         quality,
         imageCount: parseInt(imageCount, 10),
@@ -238,9 +264,11 @@ export default function CreativeGeneratorPage() {
     setNotification(null);
 
     const baseCreative = creatives[0];
+    const baseName = creativeDisplayTitle(baseCreative.title);
     creativeService
       .generate({
-        title: `Variation: ${baseCreative.title}`,
+        title: `Variation: ${baseName}`,
+        creativeName: `${baseName} Variation`,
         aspectRatio: baseCreative.aspectRatio,
         quality,
         imageCount: 1,
@@ -284,6 +312,7 @@ export default function CreativeGeneratorPage() {
     creativeService
       .generate({
         title: `Revision: ${revisionPrompt.trim()}`,
+        creativeName: `${creativeDisplayTitle(selectedCreativeForRevision.title)} Revision`,
         aspectRatio: selectedCreativeForRevision.aspectRatio,
         quality,
         imageCount: 1,
@@ -311,6 +340,22 @@ export default function CreativeGeneratorPage() {
           tone: 'info',
         });
       });
+  };
+
+  const captureCreativeSignal = (
+    creative: CreativeItem,
+    signalType: CreativeFeedbackSignalType,
+    source: string,
+  ) => {
+    creativeService
+      .createFeedback(creative.id, {
+        metadata: {
+          promptGenerationId: creative.promptGenerationId,
+          source,
+        },
+        signalType,
+      })
+      .catch((err) => console.error(`Failed to capture ${signalType} signal:`, err));
   };
 
   const handleCreativeAction = (id: string, actionType: string) => {
@@ -355,7 +400,10 @@ export default function CreativeGeneratorPage() {
       const creative = creatives.find((c) => c.id === id);
       if (creative) {
         const url = creative.imageUrl;
-        const filename = creative.cpanelFilename || `${creative.title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.png`;
+        const filename =
+          creative.cpanelFilename ||
+          `${creativeDisplayTitle(creative.title).toLowerCase().replace(/[^a-z0-9]+/g, '_')}.png`;
+        captureCreativeSignal(creative, 'exported', 'download_action');
 
         setNotification({
           title: 'Downloading Image',
@@ -385,9 +433,10 @@ export default function CreativeGeneratorPage() {
       if (creative) {
         setSelectedCreativeForRevision(creative);
         setRevisionPrompt('');
+        captureCreativeSignal(creative, 'revision_requested', 'select_revision_action');
         setNotification({
           title: 'Revision Image Selected',
-          message: `Selected '${creative.title}' for revision. Enter adjustments in the revision deck below the grid.`,
+          message: `Selected '${creativeDisplayTitle(creative.title)}' for revision.`,
           tone: 'success',
         });
       }
@@ -490,7 +539,9 @@ export default function CreativeGeneratorPage() {
           >
             <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 px-4 py-3 bg-white dark:bg-slate-900">
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{previewCreative.title}</p>
+                <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                  {creativeDisplayTitle(previewCreative.title)}
+                </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">{previewCreative.aspectRatio}</p>
               </div>
               <Button
@@ -506,9 +557,12 @@ export default function CreativeGeneratorPage() {
             </div>
             <div className="flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-950/40">
               <img
-                alt={previewCreative.title}
+                alt={creativeDisplayTitle(previewCreative.title)}
                 className="max-h-[48vh] w-auto rounded-lg object-contain shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-955"
                 src={previewCreative.imageUrl}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300"><rect width="400" height="300" fill="%230f172a"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-family="sans-serif" font-size="16">Image failed to load</text></svg>';
+                }}
               />
             </div>
             <div className="flex items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800 px-4 py-3 bg-slate-50 dark:bg-slate-900/50">
@@ -522,7 +576,7 @@ export default function CreativeGeneratorPage() {
                   setPreviewCreative(null);
                   setNotification({
                     title: 'Revision Image Selected',
-                    message: `Selected '${previewCreative.title}' for revision. Enter adjustments in the revision deck below the grid.`,
+                    message: `Selected '${creativeDisplayTitle(previewCreative.title)}' for revision.`,
                     tone: 'success',
                   });
                 }}
@@ -577,6 +631,13 @@ export default function CreativeGeneratorPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
+            <Input
+              label="Creative name"
+              placeholder="Example: Trust-led healthcare square ad"
+              value={creativeName}
+              onChange={(event) => setCreativeName(event.target.value)}
+            />
+
             <Textarea
               className="min-h-36"
               label="Optional generation note"
@@ -600,9 +661,12 @@ export default function CreativeGeneratorPage() {
                     const selectedGen = promptGenerations.find((g) => g.id === val);
                     if (selectedGen) {
                       setPrompt('');
+                      setCreativeName(promptGenerationDisplayTitle(selectedGen));
                       setAspectRatio(selectedGen.aspectRatio);
                       setQuality(selectedGen.quality);
                       setImageCount(String(selectedGen.imageCount));
+                    } else {
+                      setCreativeName('');
                     }
                   }}
                   options={[
@@ -627,12 +691,19 @@ export default function CreativeGeneratorPage() {
                         <div className="h-10 w-10 rounded bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-semibold">No Image</div>
                       )}
                       <div className="min-w-0">
-                        <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 truncate">Image & brand references active</p>
+                        <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 truncate">
+                          {promptGenerationDisplayTitle(selectedPromptGeneration)}
+                        </p>
                         <p className="text-[10px] text-slate-400">Sent to OpenAI image-to-image API</p>
                       </div>
                     </div>
                   </div>
                 )}
+                {promptGenerationsLoadError ? (
+                  <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                    {promptGenerationsLoadError}
+                  </p>
+                ) : null}
               </div>
               <Select
                 label="Aspect ratio"
@@ -780,7 +851,26 @@ export default function CreativeGeneratorPage() {
                 </div>
               ) : null}
 
-              {creatives.length === 0 ? (
+              {isLoadingCreatives ? (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="h-64 rounded-xl border border-slate-200 bg-slate-100/70 dark:border-slate-800 dark:bg-slate-900/60 animate-pulse"
+                    />
+                  ))}
+                </div>
+              ) : creativesLoadError ? (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-rose-200 bg-rose-50/50 p-12 text-center dark:border-rose-900 dark:bg-rose-950/20">
+                  <ImagePlus className="h-10 w-10 text-rose-400" />
+                  <p className="mt-2 text-sm font-semibold text-rose-700 dark:text-rose-300">
+                    Could not load creatives
+                  </p>
+                  <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">
+                    {creativesLoadError}
+                  </p>
+                </div>
+              ) : creatives.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-12 text-center dark:border-slate-800 dark:bg-slate-950/20">
                   <ImagePlus className="h-10 w-10 text-slate-400" />
                   <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -802,13 +892,13 @@ export default function CreativeGeneratorPage() {
                           type="button"
                           className="block w-full cursor-zoom-in text-left"
                           onClick={() => setPreviewCreative(creative)}
-                          aria-label={`Preview ${creative.title}`}
+                          aria-label={`Preview ${creativeDisplayTitle(creative.title)}`}
                         >
                           <MockVisual
                             aspect={aspectMap[creative.aspectRatio] ?? 'aspect-[4/3]'}
                             className="rounded-none transition-transform duration-500 group-hover:scale-[1.02]"
                             label={creative.aspectRatio}
-                            title={creative.title}
+                            title={creativeDisplayTitle(creative.title)}
                             variant={creative.variant}
                             imageUrl={creative.imageUrl}
                           />
@@ -856,7 +946,7 @@ export default function CreativeGeneratorPage() {
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <h2 className="font-semibold text-slate-950 dark:text-white line-clamp-1">
-                              {creative.title}
+                              {creativeDisplayTitle(creative.title)}
                             </h2>
                             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                               {creative.brand}
@@ -878,6 +968,12 @@ export default function CreativeGeneratorPage() {
               )}
             </CardContent>
           </Card>
+
+          <CreativeLearningPanel
+            creatives={creatives}
+            isLoading={isLoadingCreatives}
+            onNotify={setNotification}
+          />
 
           {selectedCreativeForRevision && (
             <Card className="border-brand-200 bg-brand-50/5 animate-scale-in dark:border-brand-900 dark:bg-slate-900/40">
@@ -905,7 +1001,7 @@ export default function CreativeGeneratorPage() {
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-semibold text-slate-800 dark:text-slate-200">
-                      {selectedCreativeForRevision.title}
+                      {creativeDisplayTitle(selectedCreativeForRevision.title)}
                     </p>
                     <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
                       Modifying this image version ({selectedCreativeForRevision.aspectRatio})

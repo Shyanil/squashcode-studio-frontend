@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 
 import { logoutNavigationItem, navigationItems } from '@/constants/navigation';
+import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/utils/cn';
 
 interface SidebarProps {
@@ -10,6 +11,7 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const LogoutIcon = logoutNavigationItem.icon;
+  const { logout } = useAuth();
 
   return (
     <aside
@@ -46,7 +48,12 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               to={item.path}
             >
               <Icon aria-hidden="true" className="h-5 w-5 shrink-0" />
-              <span className="min-w-0 truncate">{item.label}</span>
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {item.status === 'coming-soon' ? (
+                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                  Soon
+                </span>
+              ) : null}
             </NavLink>
           );
         })}
@@ -55,7 +62,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       <div className="border-t border-slate-200 p-3 dark:border-slate-800">
         <NavLink
           className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
-          onClick={onClose}
+          onClick={() => {
+            void logout();
+            onClose();
+          }}
           to={logoutNavigationItem.path}
         >
           <LogoutIcon aria-hidden="true" className="h-5 w-5 shrink-0" />

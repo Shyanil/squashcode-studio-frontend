@@ -7,8 +7,9 @@ export interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (payload: LoginPayload) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  resendVerification: (email: string) => Promise<void>;
+  signUp: (payload: LoginPayload & { name: string }) => Promise<{ needsEmailConfirmation: boolean }>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
-
