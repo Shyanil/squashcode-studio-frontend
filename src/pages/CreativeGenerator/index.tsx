@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import {
   ChevronDown,
   Copy,
@@ -105,6 +105,7 @@ export default function CreativeGeneratorPage() {
   const [imageCount, setImageCount] = useState('1');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoadingCreatives, setIsLoadingCreatives] = useState(true);
+  const [isLoadingPromptGenerations, setIsLoadingPromptGenerations] = useState(true);
   const [creativesLoadError, setCreativesLoadError] = useState<string | null>(null);
   const [promptGenerationsLoadError, setPromptGenerationsLoadError] = useState<string | null>(
     null,
@@ -129,6 +130,24 @@ export default function CreativeGeneratorPage() {
     return prompt.trim();
   };
 
+  const loadPromptGenerations = useCallback(() => {
+    setIsLoadingPromptGenerations(true);
+    setPromptGenerationsLoadError(null);
+
+    return promptService
+      .listGenerations()
+      .then((res) => {
+        if (res.data && res.data.data) {
+          setPromptGenerations(res.data.data);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to load prompt generations:', err);
+        setPromptGenerationsLoadError(errorMessage(err, 'Failed to load saved JSON presets.'));
+      })
+      .finally(() => setIsLoadingPromptGenerations(false));
+  }, []);
+
   useEffect(() => {
     // Load generated creatives from database
     setIsLoadingCreatives(true);
@@ -146,20 +165,26 @@ export default function CreativeGeneratorPage() {
       })
       .finally(() => setIsLoadingCreatives(false));
 
-    // Load prompt generations from Supabase (interlinking)
-    setPromptGenerationsLoadError(null);
-    promptService
-      .listGenerations()
-      .then((res) => {
-        if (res.data && res.data.data) {
-          setPromptGenerations(res.data.data);
-        }
-      })
-      .catch((err: unknown) => {
-        console.error('Failed to load prompt generations:', err);
-        setPromptGenerationsLoadError(errorMessage(err, 'Failed to load saved JSON presets.'));
-      });
-  }, []);
+    void loadPromptGenerations();
+  }, [loadPromptGenerations]);
+
+  useEffect(() => {
+    const refreshOnFocus = () => {
+      if (document.visibilityState === 'visible') {
+        void loadPromptGenerations();
+      }
+    };
+
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnFocus);
+    window.addEventListener('prompt-generation-saved', refreshOnFocus);
+
+    return () => {
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnFocus);
+      window.removeEventListener('prompt-generation-saved', refreshOnFocus);
+    };
+  }, [loadPromptGenerations]);
 
   useEffect(() => {
     if (notification) {
@@ -664,15 +689,15 @@ export default function CreativeGeneratorPage() {
                     if (selectedGen) {
                       setPrompt('');
                       setCreativeName(promptGenerationDisplayTitle(selectedGen));
-                      setAspectRatio(selectedGen.aspectRatio);
-                      setQuality(selectedGen.quality);
-                      setImageCount(String(selectedGen.imageCount));
                     } else {
                       setCreativeName('');
                     }
                   }}
                   options={[
-                    { label: 'Select preset...', value: '' },
+                    {
+                      label: isLoadingPromptGenerations ? 'Loading saved JSON...' : 'Select preset...',
+                      value: '',
+                    },
                     ...promptGenerations.map((g) => ({
                       label: promptGenerationLabel(g),
                       value: g.id,
@@ -710,6 +735,17 @@ export default function CreativeGeneratorPage() {
                     {promptGenerationsLoadError}
                   </p>
                 ) : null}
+                <Button
+                  className="w-full"
+                  isLoading={isLoadingPromptGenerations}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void loadPromptGenerations()}
+                >
+                  <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
+                  Refresh saved JSON
+                </Button>
               </div>
               <Select
                 label="Aspect ratio"

@@ -37,8 +37,6 @@ interface SupportingAssetPreview {
   url?: string;
 }
 
-const savedPromptKey = 'squashcode-prompt-generator-save';
-
 const starterMessages: ChatMessage[] = [
   {
     id: 'assistant-intro',
@@ -133,6 +131,7 @@ export default function PromptGeneratorPage() {
   const [statusText, setStatusText] = useState('Start with an image or chat');
   const [statusKind, setStatusKind] = useState<StatusKind>('info');
   const [saved, setSaved] = useState(false);
+  const [latestGenerationId, setLatestGenerationId] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isUploadingAssets, setIsUploadingAssets] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -284,6 +283,7 @@ export default function PromptGeneratorPage() {
       setCreativeContext(result.session.creativeContext);
       appendMessages([result.assistantMessage]);
       setGeneratedJson('');
+      setLatestGenerationId(null);
       updateStatus('Image analyzed and creative context updated', 'success');
     } catch (error) {
       updateStatus(displayError(error), 'error');
@@ -311,6 +311,7 @@ export default function PromptGeneratorPage() {
     setCreativeContext(result.session.creativeContext);
     appendMessages([result.userMessage, result.assistantMessage]);
     setGeneratedJson('');
+    setLatestGenerationId(null);
     setSaved(false);
     updateStatus(
       hadGeneratedJson
@@ -397,6 +398,7 @@ export default function PromptGeneratorPage() {
 
       setAdditionalAssets((current) => [...uploadedAssets, ...current]);
       setGeneratedJson('');
+      setLatestGenerationId(null);
       updateStatus(
         `${uploadedAssets.length} supporting image(s) attached to this JSON session`,
         'success',
@@ -445,8 +447,10 @@ export default function PromptGeneratorPage() {
       }
       setCreativeContext(result.session.creativeContext);
       setGeneratedJson(nextJson);
+      setLatestGenerationId(result.generation.id);
       setSaved(true);
-      updateStatus(`Generated JSON v${result.generation.versionNumber} saved`, 'success');
+      window.dispatchEvent(new CustomEvent('prompt-generation-saved'));
+      updateStatus(`Generated JSON v${result.generation.versionNumber} saved to database`, 'success');
     } catch (error) {
       updateStatus(displayError(error), 'error');
     } finally {
@@ -472,9 +476,14 @@ export default function PromptGeneratorPage() {
   };
 
   const handleSave = () => {
-    window.localStorage.setItem(savedPromptKey, generatedJson);
     setSaved(true);
-    updateStatus('JSON version saved locally and already saved in session', 'success');
+    window.dispatchEvent(new CustomEvent('prompt-generation-saved'));
+    updateStatus(
+      latestGenerationId
+        ? 'JSON is saved to database and available in Creative Generator'
+        : 'Generate JSON first to save this session to database',
+      latestGenerationId ? 'success' : 'info',
+    );
   };
 
   return (
