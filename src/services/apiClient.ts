@@ -55,7 +55,7 @@ apiClient.interceptors.request.use(async (config) => {
     config.headers.set('x-user-id', supabaseUserId);
   }
 
-  if (promptUserId) {
+  if (promptUserId && !supabaseUserId) {
     config.headers.set('x-user-id', promptUserId);
   }
 
