@@ -7,23 +7,6 @@ import type { AuthContextValue } from '@/context/auth-context';
 import type { AuthUser, LoginPayload } from '@/types';
 import { supabaseClient } from '@/services/supabaseClient';
 
-function authRedirectUrl() {
-  const configuredUrl = import.meta.env.VITE_AUTH_REDIRECT_URL as string | undefined;
-  const currentRedirectUrl = `${window.location.origin}/login`;
-  const isLocalHost =
-    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-
-  if (import.meta.env.PROD && !isLocalHost) {
-    return currentRedirectUrl;
-  }
-
-  if (configuredUrl?.trim()) {
-    return configuredUrl;
-  }
-
-  return currentRedirectUrl;
-}
-
 function mapSupabaseUser(user: User): AuthUser {
   const name =
     typeof user.user_metadata.name === 'string' && user.user_metadata.name.trim()
@@ -102,50 +85,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
         }
 
         setUser(null);
-      },
-      resendVerification: async (email: string) => {
-        if (!supabaseClient) {
-          throw new Error('Supabase Auth is not configured.');
-        }
-
-        const { error } = await supabaseClient.auth.resend({
-          type: 'signup',
-          email,
-          options: {
-            emailRedirectTo: authRedirectUrl(),
-          },
-        });
-
-        if (error) {
-          throw error;
-        }
-      },
-      signUp: async (payload: LoginPayload & { name: string }) => {
-        if (!supabaseClient) {
-          throw new Error('Supabase Auth is not configured.');
-        }
-
-        const { data, error } = await supabaseClient.auth.signUp({
-          email: payload.email,
-          password: payload.password,
-          options: {
-            emailRedirectTo: authRedirectUrl(),
-            data: {
-              name: payload.name,
-            },
-          },
-        });
-
-        if (error) {
-          throw error;
-        }
-
-        if (data.session?.user) {
-          setUser(mapSupabaseUser(data.session.user));
-          return { needsEmailConfirmation: false };
-        }
-
-        return { needsEmailConfirmation: true };
       },
     }),
     [isLoading, user],

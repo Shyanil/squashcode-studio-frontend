@@ -3,8 +3,12 @@ import {
   ChevronDown,
   Copy,
   Download,
+  Folder,
+  FolderOpen,
+  FolderPlus,
   Heart,
   ImagePlus,
+  Images,
   RefreshCw,
   SlidersHorizontal,
   Sparkles,
@@ -33,6 +37,10 @@ import {
   type CreativeFeedbackSignalType,
   type CreativeItem,
 } from '@/services/creative.service';
+import {
+  creativeFoldersService,
+  type CreativeFolder,
+} from '@/services/creativeFolders.service';
 import { cn } from '@/utils/cn';
 import { creativeDisplayTitle, promptGenerationDisplayTitle } from '@/utils/creativeDisplay';
 
@@ -64,6 +72,9 @@ const countOptions = [
   { label: '4 images', value: '4' },
   { label: '6 images', value: '6' },
 ];
+
+const allFolderId = '__all__';
+const unsortedFolderId = '__unsorted__';
 
 function promptGenerationLabel(generation: PromptGeneration) {
   const createdDate = new Date(generation.createdAt);
@@ -119,6 +130,13 @@ export default function CreativeGeneratorPage() {
     tone: 'success' | 'info';
   } | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [folders, setFolders] = useState<CreativeFolder[]>([]);
+  const [foldersError, setFoldersError] = useState<string | null>(null);
+  const [activeFolderId, setActiveFolderId] = useState<string>(allFolderId);
+  const [isFolderFormOpen, setIsFolderFormOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [isSavingFolder, setIsSavingFolder] = useState(false);
+  const [movingCreativeId, setMovingCreativeId] = useState<string | null>(null);
   const [selectedCreativeForRevision, setSelectedCreativeForRevision] = useState<CreativeItem | null>(null);
   const [revisionPrompt, setRevisionPrompt] = useState('');
 
@@ -128,6 +146,153 @@ export default function CreativeGeneratorPage() {
 
   const creativeTitle = () => {
     return prompt.trim();
+  };
+
+  const folderNameById = new Map(folders.map((folder) => [folder.id, folder.name]));
+  const unsortedCount = creatives.filter((creative) => !creative.folderId).length;
+  const folderCounts = new Map<string, number>();
+  creatives.forEach((creative) => {
+    if (creative.folderId) {
+      folderCounts.set(creative.folderId, (folderCounts.get(creative.folderId) ?? 0) + 1);
+    }
+  });
+
+  const activeFolder = folders.find((folder) => folder.id === activeFolderId);
+  const visibleCreatives = creatives.filter((creative) => {
+    if (activeFolderId === allFolderId) {
+      return true;
+    }
+
+    if (activeFolderId === unsortedFolderId) {
+      return !creative.folderId;
+    }
+
+    return creative.folderId === activeFolderId;
+  });
+
+  // New generations land in the folder the user is currently browsing.
+  const targetFolderId =
+    activeFolderId === allFolderId || activeFolderId === unsortedFolderId
+      ? undefined
+      : activeFolderId;
+
+  const moveOptions = [
+    { label: 'Unsorted', value: '' },
+    ...folders.map((folder) => ({ label: folder.name, value: folder.id })),
+  ];
+
+  const loadFolders = useCallback(() => {
+    setFoldersError(null);
+
+    return creativeFoldersService
+      .list()
+      .then((res) => {
+        if (res.data && res.data.data) {
+          setFolders(res.data.data);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to load folders:', err);
+        setFoldersError(errorMessage(err, 'Failed to load folders.'));
+      });
+  }, []);
+
+  const handleCreateFolder = () => {
+    const name = newFolderName.trim();
+
+    if (!name) {
+      setNotification({
+        title: 'Folder name required',
+        message: 'Type a folder name before saving.',
+        tone: 'info',
+      });
+      return;
+    }
+
+    setIsSavingFolder(true);
+
+    creativeFoldersService
+      .create({ name })
+      .then((res) => {
+        const folder = res.data?.data;
+
+        if (folder) {
+          setFolders((prev) => [...prev, folder]);
+          setActiveFolderId(folder.id);
+        }
+
+        setNewFolderName('');
+        setIsFolderFormOpen(false);
+        setNotification({
+          title: 'Folder created',
+          message: `"${name}" is ready. New images will be saved here.`,
+          tone: 'success',
+        });
+      })
+      .catch((err: unknown) => {
+        setNotification({
+          title: 'Could not create folder',
+          message: errorMessage(err, 'Failed to create the folder.'),
+          tone: 'info',
+        });
+      })
+      .finally(() => setIsSavingFolder(false));
+  };
+
+  const handleDeleteFolder = (folder: CreativeFolder) => {
+    creativeFoldersService
+      .remove(folder.id)
+      .then(() => {
+        setFolders((prev) => prev.filter((item) => item.id !== folder.id));
+        setCreatives((prev) =>
+          prev.map((creative) =>
+            creative.folderId === folder.id ? { ...creative, folderId: null } : creative,
+          ),
+        );
+        setActiveFolderId((current) => (current === folder.id ? allFolderId : current));
+        setNotification({
+          title: 'Folder removed',
+          message: `"${folder.name}" was deleted. Its images moved back to Unsorted.`,
+          tone: 'success',
+        });
+      })
+      .catch((err: unknown) => {
+        setNotification({
+          title: 'Could not delete folder',
+          message: errorMessage(err, 'Failed to delete the folder.'),
+          tone: 'info',
+        });
+      });
+  };
+
+  const handleMoveCreative = (creativeId: string, folderId: string) => {
+    const nextFolderId = folderId || null;
+    setMovingCreativeId(creativeId);
+
+    creativeFoldersService
+      .moveCreative(creativeId, nextFolderId)
+      .then(() => {
+        setCreatives((prev) =>
+          prev.map((creative) =>
+            creative.id === creativeId ? { ...creative, folderId: nextFolderId } : creative,
+          ),
+        );
+        setNotification({
+          title: 'Image moved',
+          message: nextFolderId
+            ? `Moved to "${folderNameById.get(nextFolderId) ?? 'folder'}".`
+            : 'Moved back to Unsorted.',
+          tone: 'success',
+        });
+      })
+      .catch((err: unknown) => {
+        setNotification({
+          title: 'Move failed',
+          message: errorMessage(err, 'Failed to move the image.'),
+          tone: 'info',
+        });
+      })
+      .finally(() => setMovingCreativeId(null));
   };
 
   const loadPromptGenerations = useCallback(() => {
@@ -166,7 +331,8 @@ export default function CreativeGeneratorPage() {
       .finally(() => setIsLoadingCreatives(false));
 
     void loadPromptGenerations();
-  }, [loadPromptGenerations]);
+    void loadFolders();
+  }, [loadFolders, loadPromptGenerations]);
 
   useEffect(() => {
     const refreshOnFocus = () => {
@@ -216,6 +382,7 @@ export default function CreativeGeneratorPage() {
         quality,
         imageCount: parseInt(imageCount, 10),
         promptGenerationId: jsonPreset || undefined,
+        folderId: targetFolderId,
       })
       .then((res) => {
         setIsGenerating(false);
@@ -261,6 +428,7 @@ export default function CreativeGeneratorPage() {
         quality,
         imageCount: parseInt(imageCount, 10),
         promptGenerationId: jsonPreset || undefined,
+        folderId: targetFolderId,
       })
       .then((res) => {
         setIsGenerating(false);
@@ -298,6 +466,7 @@ export default function CreativeGeneratorPage() {
         quality,
         imageCount: 1,
         promptGenerationId: (baseCreative.promptGenerationId ?? jsonPreset) || undefined,
+        folderId: baseCreative.folderId ?? targetFolderId,
       })
       .then((res) => {
         setIsGenerating(false);
@@ -343,6 +512,7 @@ export default function CreativeGeneratorPage() {
         imageCount: 1,
         promptGenerationId: selectedCreativeForRevision.promptGenerationId || jsonPreset || undefined,
         referenceImageUrl: selectedCreativeForRevision.imageUrl,
+        folderId: selectedCreativeForRevision.folderId ?? targetFolderId,
       })
       .then((res) => {
         setIsGenerating(false);
@@ -872,6 +1042,160 @@ export default function CreativeGeneratorPage() {
                 </Button>
               </div>
             </CardHeader>
+
+            {/* Folder rail: click a folder to see only its images. */}
+            <div className="border-y border-slate-100 bg-slate-50/60 px-6 py-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                  Folders
+                </p>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setIsFolderFormOpen((open) => !open);
+                    setNewFolderName('');
+                  }}
+                >
+                  <FolderPlus aria-hidden="true" className="h-4 w-4" />
+                  New folder
+                </Button>
+              </div>
+
+              {isFolderFormOpen ? (
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    autoFocus
+                    className="h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                    maxLength={80}
+                    placeholder="Folder name, e.g. Diwali Campaign"
+                    value={newFolderName}
+                    onChange={(event) => setNewFolderName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        handleCreateFolder();
+                      }
+
+                      if (event.key === 'Escape') {
+                        setIsFolderFormOpen(false);
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      className="h-10"
+                      isLoading={isSavingFolder}
+                      size="sm"
+                      type="button"
+                      onClick={handleCreateFolder}
+                    >
+                      Create
+                    </Button>
+                    <Button
+                      className="h-10"
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setIsFolderFormOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {foldersError ? (
+                <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  {foldersError}
+                </p>
+              ) : null}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  className={cn(
+                    'inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition',
+                    activeFolderId === allFolderId
+                      ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800',
+                  )}
+                  type="button"
+                  onClick={() => setActiveFolderId(allFolderId)}
+                >
+                  <Images aria-hidden="true" className="h-4 w-4" />
+                  All images
+                  <span className="text-xs opacity-70">{creatives.length}</span>
+                </button>
+
+                {unsortedCount > 0 ? (
+                  <button
+                    className={cn(
+                      'inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition',
+                      activeFolderId === unsortedFolderId
+                        ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800',
+                    )}
+                    type="button"
+                    onClick={() => setActiveFolderId(unsortedFolderId)}
+                  >
+                    <Folder aria-hidden="true" className="h-4 w-4" />
+                    Unsorted
+                    <span className="text-xs opacity-70">{unsortedCount}</span>
+                  </button>
+                ) : null}
+
+                {folders.map((folder) => {
+                  const isActive = folder.id === activeFolderId;
+
+                  return (
+                    <div
+                      className={cn(
+                        'group inline-flex items-center rounded-lg border transition',
+                        isActive
+                          ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800',
+                      )}
+                      key={folder.id}
+                    >
+                      <button
+                        className="inline-flex items-center gap-2 py-2 pl-3 pr-2 text-sm font-medium"
+                        type="button"
+                        onClick={() => setActiveFolderId(folder.id)}
+                      >
+                        {isActive ? (
+                          <FolderOpen aria-hidden="true" className="h-4 w-4" />
+                        ) : (
+                          <Folder aria-hidden="true" className="h-4 w-4" />
+                        )}
+                        {folder.name}
+                        <span className="text-xs opacity-70">
+                          {folderCounts.get(folder.id) ?? 0}
+                        </span>
+                      </button>
+                      <button
+                        aria-label={`Delete folder ${folder.name}`}
+                        className="rounded-r-lg py-2 pl-1 pr-2 opacity-0 transition hover:text-rose-500 focus-visible:opacity-100 group-hover:opacity-100"
+                        title="Delete folder (images move to Unsorted)"
+                        type="button"
+                        onClick={() => handleDeleteFolder(folder)}
+                      >
+                        <X aria-hidden="true" className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                {activeFolder
+                  ? `Showing ${visibleCreatives.length} image(s) in "${activeFolder.name}". New generations save here.`
+                  : activeFolderId === unsortedFolderId
+                    ? `Showing ${visibleCreatives.length} image(s) that are not in a folder yet.`
+                    : 'Showing every image. Pick a folder to filter and to save new generations into it.'}
+              </p>
+            </div>
+
             <CardContent>
               {/* Dynamic Generation Skeletons / Slots */}
               {isGenerating ? (
@@ -912,19 +1236,21 @@ export default function CreativeGeneratorPage() {
                     {creativesLoadError}
                   </p>
                 </div>
-              ) : creatives.length === 0 ? (
+              ) : visibleCreatives.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-12 text-center dark:border-slate-800 dark:bg-slate-950/20">
                   <ImagePlus className="h-10 w-10 text-slate-400" />
                   <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
-                    No creatives yet
+                    {creatives.length === 0 ? 'No creatives yet' : 'This folder is empty'}
                   </p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    Use the form on the left to start generating visual options.
+                    {creatives.length === 0
+                      ? 'Use the form on the left to start generating visual options.'
+                      : 'Generate here, or move an existing image into this folder from its card.'}
                   </p>
                 </div>
               ) : (
                 <div className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
-                  {creatives.map((creative) => (
+                  {visibleCreatives.map((creative) => (
                     <article
                       className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl dark:border-slate-800 dark:bg-slate-950"
                       key={creative.id}
@@ -1003,6 +1329,27 @@ export default function CreativeGeneratorPage() {
                             <Badge key={tag}>{tag}</Badge>
                           ))}
                         </div>
+                        <label className="flex items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                          <Folder
+                            aria-hidden="true"
+                            className="h-3.5 w-3.5 shrink-0 text-slate-400"
+                          />
+                          <span className="sr-only">Folder</span>
+                          <select
+                            className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                            disabled={movingCreativeId === creative.id}
+                            value={creative.folderId ?? ''}
+                            onChange={(event) =>
+                              handleMoveCreative(creative.id, event.target.value)
+                            }
+                          >
+                            {moveOptions.map((option) => (
+                              <option key={option.value || 'unsorted'} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                       </div>
                     </article>
                   ))}

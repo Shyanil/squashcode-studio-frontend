@@ -19,6 +19,7 @@ export interface CreativeItem {
   cpanelType?: 'generation' | 'reference';
   promptGenerationId?: string;
   referenceImageUrl?: string;
+  folderId?: string | null;
 }
 
 export type CreativeFeedbackSignalType =
@@ -89,6 +90,7 @@ export const creativeService = {
     imageCount?: number;
     promptGenerationId?: string;
     referenceImageUrl?: string;
+    folderId?: string;
   }) => apiClient.post<ApiResponse<CreativeItem[]>>('/creative/generate', payload),
 
   list: () => apiClient.get<ApiResponse<CreativeItem[]>>('/creative'),
