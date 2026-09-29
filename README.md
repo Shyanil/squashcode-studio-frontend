@@ -23,11 +23,15 @@ Cloudflare Workers Builds should use the repository root, `npm run build` as the
 and `npx wrangler deploy` as the deploy command. `wrangler.jsonc` serves `dist/` and handles
 React Router URLs as a single-page application.
 
-Set these **build-time** variables in Cloudflare Workers Builds:
+Set `VITE_API_URL=https://squashcode-studio-backend.shyanilsquashcode.workers.dev/api` as a
+**build-time** variable in Cloudflare Workers Builds if you want to override the code default.
+The app also accepts these build-time variables:
 
-- `VITE_API_URL=https://squashcode-studio-backend.shyanilsquashcode.workers.dev/api`
 - `VITE_SUPABASE_URL`: the Supabase project URL.
 - `VITE_SUPABASE_ANON_KEY`: the Supabase public anon key.
+
+Production builds fall back to this project's public Supabase URL and anon key when those two
+variables are missing or blank. Values set in Cloudflare Builds take precedence.
 
 `VITE_PROMPT_USER_ID` is optional for local prompt development. This static frontend needs no
 runtime variables or secrets. Vite embeds `VITE_` values into public JavaScript, so never put a
