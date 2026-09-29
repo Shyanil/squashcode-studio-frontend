@@ -41,6 +41,10 @@ import {
   creativeFoldersService,
   type CreativeFolder,
 } from '@/services/creativeFolders.service';
+import {
+  promptJsonFoldersService,
+  type PromptJsonFolder,
+} from '@/services/promptJsonFolders.service';
 import { cn } from '@/utils/cn';
 import { creativeDisplayTitle, promptGenerationDisplayTitle } from '@/utils/creativeDisplay';
 
@@ -75,6 +79,8 @@ const countOptions = [
 
 const allFolderId = '__all__';
 const unsortedFolderId = '__unsorted__';
+const allJsonFolderId = '__json_all__';
+const jsonUnsortedFolderId = 'unsorted';
 
 function promptGenerationLabel(generation: PromptGeneration) {
   const createdDate = new Date(generation.createdAt);
@@ -124,6 +130,9 @@ export default function CreativeGeneratorPage() {
   const [creatives, setCreatives] = useState<CreativeItem[]>([]);
   const [previewCreative, setPreviewCreative] = useState<CreativeItem | null>(null);
   const [promptGenerations, setPromptGenerations] = useState<PromptGeneration[]>([]);
+  const [promptJsonFolders, setPromptJsonFolders] = useState<PromptJsonFolder[]>([]);
+  const [jsonFolderFilter, setJsonFolderFilter] = useState(allJsonFolderId);
+  const [unsortedJsonCount, setUnsortedJsonCount] = useState(0);
   const [notification, setNotification] = useState<{
     message: string;
     title: string;
@@ -295,22 +304,49 @@ export default function CreativeGeneratorPage() {
       .finally(() => setMovingCreativeId(null));
   };
 
+  const jsonFolderQueryParam = useCallback(() => {
+    if (jsonFolderFilter === allJsonFolderId) {
+      return undefined;
+    }
+
+    if (jsonFolderFilter === jsonUnsortedFolderId) {
+      return 'unsorted';
+    }
+
+    return jsonFolderFilter;
+  }, [jsonFolderFilter]);
+
   const loadPromptGenerations = useCallback(() => {
     setIsLoadingPromptGenerations(true);
     setPromptGenerationsLoadError(null);
 
     return promptService
-      .listGenerations()
+      .listGenerations(jsonFolderQueryParam())
       .then((res) => {
-        if (res.data && res.data.data) {
-          setPromptGenerations(res.data.data);
-        }
+        const nextGenerations = res.data?.data ?? [];
+        setPromptGenerations(nextGenerations);
+        setJsonPreset((current) =>
+          current && nextGenerations.some((generation) => generation.id === current)
+            ? current
+            : '',
+        );
       })
       .catch((err: unknown) => {
         console.error('Failed to load prompt generations:', err);
         setPromptGenerationsLoadError(errorMessage(err, 'Failed to load saved JSON presets.'));
       })
       .finally(() => setIsLoadingPromptGenerations(false));
+  }, [jsonFolderQueryParam]);
+
+  const loadPromptJsonFolders = useCallback(() => {
+    return promptJsonFoldersService
+      .list()
+      .then((res) => {
+        setPromptJsonFolders(res.data?.data ?? []);
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to load JSON folders:', err);
+      });
   }, []);
 
   useEffect(() => {
@@ -330,14 +366,27 @@ export default function CreativeGeneratorPage() {
       })
       .finally(() => setIsLoadingCreatives(false));
 
-    void loadPromptGenerations();
     void loadFolders();
-  }, [loadFolders, loadPromptGenerations]);
+    void loadPromptJsonFolders();
+    promptService
+      .listGenerations('unsorted')
+      .then((res) => setUnsortedJsonCount(res.data?.data?.length ?? 0))
+      .catch(() => setUnsortedJsonCount(0));
+  }, [loadFolders, loadPromptGenerations, loadPromptJsonFolders]);
+
+  useEffect(() => {
+    void loadPromptGenerations();
+  }, [jsonFolderFilter, loadPromptGenerations]);
 
   useEffect(() => {
     const refreshOnFocus = () => {
       if (document.visibilityState === 'visible') {
         void loadPromptGenerations();
+        void loadPromptJsonFolders();
+        promptService
+          .listGenerations('unsorted')
+          .then((res) => setUnsortedJsonCount(res.data?.data?.length ?? 0))
+          .catch(() => setUnsortedJsonCount(0));
       }
     };
 
@@ -350,7 +399,7 @@ export default function CreativeGeneratorPage() {
       document.removeEventListener('visibilitychange', refreshOnFocus);
       window.removeEventListener('prompt-generation-saved', refreshOnFocus);
     };
-  }, [loadPromptGenerations]);
+  }, [loadPromptGenerations, loadPromptJsonFolders]);
 
   useEffect(() => {
     if (notification) {
@@ -390,7 +439,7 @@ export default function CreativeGeneratorPage() {
           setCreatives((prev) => [...res.data.data, ...prev]);
           setNotification({
             title: 'Creatives Generated',
-            message: `Successfully generated ${imageCount} option(s) and uploaded to cpanel.`,
+            message: `Successfully generated ${imageCount} option(s) and saved to Supabase Storage.`,
             tone: 'success',
           });
         }
@@ -596,6 +645,7 @@ export default function CreativeGeneratorPage() {
       if (creative) {
         const url = creative.imageUrl;
         const filename =
+          creative.storagePath?.split('/').pop() ||
           creative.cpanelFilename ||
           `${creativeDisplayTitle(creative.title).toLowerCase().replace(/[^a-z0-9]+/g, '_')}.png`;
         captureCreativeSignal(creative, 'exported', 'download_action');
@@ -684,7 +734,7 @@ export default function CreativeGeneratorPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-slate-300 animate-pulse" />
-                  <span>Uploading output to CPanel directory...</span>
+                  <span>Uploading output to Supabase Storage...</span>
                 </div>
               </div>
             </div>
@@ -850,6 +900,22 @@ export default function CreativeGeneratorPage() {
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
               <div className="space-y-2">
                 <Select
+                  label="JSON folder"
+                  value={jsonFolderFilter}
+                  onChange={(event) => setJsonFolderFilter(event.target.value)}
+                  options={[
+                    { label: 'All JSON presets', value: allJsonFolderId },
+                    {
+                      label: `Unsorted JSON (${unsortedJsonCount})`,
+                      value: jsonUnsortedFolderId,
+                    },
+                    ...promptJsonFolders.map((folder) => ({
+                      label: `${folder.name} (${folder.jsonCount})`,
+                      value: folder.id,
+                    })),
+                  ]}
+                />
+                <Select
                   label="JSON selector"
                   value={jsonPreset}
                   onChange={(e) => {
@@ -865,7 +931,11 @@ export default function CreativeGeneratorPage() {
                   }}
                   options={[
                     {
-                      label: isLoadingPromptGenerations ? 'Loading saved JSON...' : 'Select preset...',
+                      label: isLoadingPromptGenerations
+                        ? 'Loading saved JSON...'
+                        : promptGenerations.length
+                          ? 'Select preset...'
+                          : 'No JSON in this folder',
                       value: '',
                     },
                     ...promptGenerations.map((g) => ({
@@ -874,6 +944,11 @@ export default function CreativeGeneratorPage() {
                     })),
                   ]}
                 />
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {jsonFolderFilter === allJsonFolderId
+                    ? `Showing all ${promptGenerations.length} saved JSON preset(s).`
+                    : `Showing ${promptGenerations.length} preset(s) in this folder.`}
+                </p>
                 {selectedPromptGeneration && (
                   <div className="rounded-xl border border-slate-100 dark:border-slate-800 p-2.5 bg-slate-50 dark:bg-slate-950/40 space-y-1.5 animate-fade-in">
                     <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Loaded Preset Assets</p>
@@ -911,7 +986,10 @@ export default function CreativeGeneratorPage() {
                   size="sm"
                   type="button"
                   variant="secondary"
-                  onClick={() => void loadPromptGenerations()}
+                  onClick={() => {
+                    void loadPromptGenerations();
+                    void loadPromptJsonFolders();
+                  }}
                 >
                   <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
                   Refresh saved JSON

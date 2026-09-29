@@ -5,9 +5,10 @@ export type PromptSourceType = 'text' | 'image' | 'mixed';
 export type PromptMessageRole = 'user' | 'assistant' | 'system';
 
 export interface PromptUploadedImage {
-  dataUrl: string;
-  fileName: string;
-  mimeType: string;
+  dataUrl?: string;
+  imageUrl?: string;
+  fileName?: string;
+  mimeType?: string;
   size?: number;
 }
 
@@ -63,6 +64,7 @@ export interface PromptGeneration {
   quality: string;
   imageCount: number;
   status: 'queued' | 'completed' | 'failed';
+  folderId?: string | null;
   createdAt: string;
 }
 
@@ -129,7 +131,10 @@ export const promptService = {
 
   generateSessionJson: (
     sessionId: string,
-    payload?: { outputOptions?: { aspectRatio?: string; quality?: string; imageCount?: number } },
+    payload?: {
+      folderId?: string | null;
+      outputOptions?: { aspectRatio?: string; quality?: string; imageCount?: number };
+    },
   ) =>
     apiClient.post<ApiResponse<PromptGenerateJsonResult>>(
       `/prompt/sessions/${sessionId}/generate-json`,
@@ -146,13 +151,14 @@ export const promptService = {
   enhance: (payload: { sessionId?: string; content: string }) =>
     apiClient.post<ApiResponse<PromptSendMessageResult | null>>('/prompt/enhance', payload),
 
-  listGenerations: () =>
+  listGenerations: (folderId?: string) =>
     apiClient.get<ApiResponse<PromptGeneration[]>>('/prompt/generations', {
       headers: {
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
       },
       params: {
+        ...(folderId ? { folderId } : {}),
         _: Date.now(),
       },
     }),

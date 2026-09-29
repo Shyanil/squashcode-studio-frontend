@@ -17,6 +17,8 @@ export interface CreativeItem {
   cpanelFilename?: string;
   cpanelSubfolder?: string;
   cpanelType?: 'generation' | 'reference';
+  storageBucket?: string;
+  storagePath?: string;
   promptGenerationId?: string;
   referenceImageUrl?: string;
   folderId?: string | null;

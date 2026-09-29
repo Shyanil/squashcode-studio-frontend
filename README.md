@@ -17,6 +17,24 @@ npm run dev
 - `npm run build` type-checks and builds the static app into `dist/`.
 - `npm run preview` serves the built app locally.
 
+## Cloudflare Workers
+
+Cloudflare Workers Builds should use the repository root, `npm run build` as the build command,
+and `npx wrangler deploy` as the deploy command. `wrangler.jsonc` serves `dist/` and handles
+React Router URLs as a single-page application.
+
+Set these **build-time** variables in Cloudflare Workers Builds:
+
+- `VITE_API_URL=https://squashcode-studio-backend.shyanilsquashcode.workers.dev/api`
+- `VITE_SUPABASE_URL`: the Supabase project URL.
+- `VITE_SUPABASE_ANON_KEY`: the Supabase public anon key.
+
+`VITE_PROMPT_USER_ID` is optional for local prompt development. This static frontend needs no
+runtime variables or secrets. Vite embeds `VITE_` values into public JavaScript, so never put a
+Supabase service role key or OpenAI API key there. Add
+`https://squashcode-studio-frontend.shyanilsquashcode.workers.dev/creative-generator`
+to Supabase Auth redirect URLs, and set the Supabase Site URL to the frontend Worker origin.
+
 ## Netlify
 
 This repository includes `netlify.toml` so Netlify builds the static app with:

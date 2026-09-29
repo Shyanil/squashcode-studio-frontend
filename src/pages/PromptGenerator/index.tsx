@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { Copy, Download, ImagePlus, Save, Send, Sparkles, WandSparkles } from 'lucide-react';
+import {
+  Copy,
+  Download,
+  FileJson,
+  FolderPlus,
+  ImagePlus,
+  Link2,
+  Save,
+  Send,
+  Sparkles,
+  Trash2,
+  WandSparkles,
+} from 'lucide-react';
 
 import { MockVisual } from '@/components/common';
 import { Header } from '@/components/layout/Header';
@@ -14,9 +26,14 @@ import {
   Upload,
 } from '@/components/ui';
 import { cn } from '@/utils/cn';
-import { creativeDisplayTitle } from '@/utils/creativeDisplay';
+import { creativeDisplayTitle, promptGenerationDisplayTitle } from '@/utils/creativeDisplay';
+import {
+  promptJsonFoldersService,
+  type PromptJsonFolder,
+} from '@/services/promptJsonFolders.service';
 import {
   promptService,
+  type PromptGeneration,
   type PromptMessage,
   type PromptSession,
   type PromptSourceType,
@@ -118,9 +135,44 @@ const statusDotStyles: Record<StatusKind, string> = {
   error: 'bg-rose-500',
 };
 
+const allFolderId = '__all__';
+const unsortedFolderId = 'unsorted';
+
+function folderFilterParam(activeFolderId: string) {
+  if (activeFolderId === allFolderId) {
+    return undefined;
+  }
+
+  if (activeFolderId === unsortedFolderId) {
+    return 'unsorted';
+  }
+
+  return activeFolderId;
+}
+
+function isLikelyImageUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function saveFolderId(activeFolderId: string) {
+  if (activeFolderId === allFolderId || activeFolderId === unsortedFolderId) {
+    return null;
+  }
+
+  return activeFolderId;
+}
+
 export default function PromptGeneratorPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [referenceLinkInput, setReferenceLinkInput] = useState('');
+  const [referenceLinkPreview, setReferenceLinkPreview] = useState<string | null>(null);
+  const [supportingLinkInput, setSupportingLinkInput] = useState('');
   const [jsonName, setJsonName] = useState('');
   const [promptText, setPromptText] = useState('');
   const [generatedJson, setGeneratedJson] = useState('');
@@ -136,6 +188,13 @@ export default function PromptGeneratorPage() {
   const [isUploadingAssets, setIsUploadingAssets] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [folders, setFolders] = useState<PromptJsonFolder[]>([]);
+  const [foldersError, setFoldersError] = useState<string | null>(null);
+  const [activeFolderId, setActiveFolderId] = useState(allFolderId);
+  const [isFolderFormOpen, setIsFolderFormOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [isSavingFolder, setIsSavingFolder] = useState(false);
+  const [folderGenerations, setFolderGenerations] = useState<PromptGeneration[]>([]);
   const activeAnalyzeSignatureRef = useRef<string | null>(null);
   const isSendingRef = useRef(false);
   const isGeneratingRef = useRef(false);
@@ -145,14 +204,20 @@ export default function PromptGeneratorPage() {
     setStatusKind(kind);
   };
 
+  const hasReferenceImage = Boolean(selectedFile || referenceLinkPreview);
+
   const fileSummary = useMemo(() => {
-    if (!selectedFile) {
-      return 'You can also start from chat only.';
+    if (selectedFile) {
+      const sizeMb = (selectedFile.size / (1024 * 1024)).toFixed(2);
+      return `${selectedFile.name} · ${sizeMb} MB`;
     }
 
-    const sizeMb = (selectedFile.size / (1024 * 1024)).toFixed(2);
-    return `${selectedFile.name} · ${sizeMb} MB`;
-  }, [selectedFile]);
+    if (referenceLinkPreview) {
+      return referenceLinkPreview;
+    }
+
+    return 'Upload a file, paste an image link, or start from chat only.';
+  }, [referenceLinkPreview, selectedFile]);
 
   const displayJson = useMemo(() => {
     if (generatedJson) {
@@ -185,16 +250,95 @@ export default function PromptGeneratorPage() {
   }, [generatedJson, jsonName, selectedFile]);
 
   useEffect(() => {
-    if (!selectedFile) {
-      setPreviewUrl(null);
+    if (selectedFile) {
+      const nextPreviewUrl = URL.createObjectURL(selectedFile);
+      setPreviewUrl(nextPreviewUrl);
+
+      return () => URL.revokeObjectURL(nextPreviewUrl);
+    }
+
+    setPreviewUrl(referenceLinkPreview);
+  }, [referenceLinkPreview, selectedFile]);
+
+  const [unsortedJsonCount, setUnsortedJsonCount] = useState(0);
+
+  const refreshFolderGenerations = () => {
+    const filter = folderFilterParam(activeFolderId);
+
+    promptService
+      .listGenerations(filter)
+      .then((res) => setFolderGenerations(res.data?.data ?? []))
+      .catch((err) => console.error('Failed to load saved JSON list:', err));
+
+    promptService
+      .listGenerations('unsorted')
+      .then((res) => setUnsortedJsonCount(res.data?.data?.length ?? 0))
+      .catch(() => setUnsortedJsonCount(0));
+  };
+
+  useEffect(() => {
+    promptJsonFoldersService
+      .list()
+      .then((res) => {
+        setFolders(res.data?.data ?? []);
+        setFoldersError(null);
+        refreshFolderGenerations();
+      })
+      .catch((err) => {
+        console.error('Failed to load JSON folders:', err);
+        setFoldersError(displayError(err));
+      });
+  }, []);
+
+  useEffect(() => {
+    refreshFolderGenerations();
+  }, [activeFolderId]);
+
+  const handleCreateFolder = () => {
+    const name = newFolderName.trim();
+
+    if (!name) {
+      updateStatus('Type a folder name before saving.', 'error');
       return;
     }
 
-    const nextPreviewUrl = URL.createObjectURL(selectedFile);
-    setPreviewUrl(nextPreviewUrl);
+    setIsSavingFolder(true);
 
-    return () => URL.revokeObjectURL(nextPreviewUrl);
-  }, [selectedFile]);
+    promptJsonFoldersService
+      .create({ name })
+      .then((res) => {
+        const folder = res.data?.data;
+
+        if (folder) {
+          setFolders((prev) => [...prev, folder]);
+          setActiveFolderId(folder.id);
+          setIsFolderFormOpen(false);
+          setNewFolderName('');
+          updateStatus(`Folder "${folder.name}" created. New JSON will save here.`, 'success');
+        }
+      })
+      .catch((err) => updateStatus(displayError(err), 'error'))
+      .finally(() => setIsSavingFolder(false));
+  };
+
+  const handleDeleteFolder = (folder: PromptJsonFolder) => {
+    promptJsonFoldersService
+      .remove(folder.id)
+      .then(() => {
+        setFolders((prev) => prev.filter((item) => item.id !== folder.id));
+        setActiveFolderId((current) => (current === folder.id ? allFolderId : current));
+        refreshFolderGenerations();
+        updateStatus(`"${folder.name}" deleted. Its JSON presets stay in the library as Unsorted.`, 'success');
+      })
+      .catch((err) => updateStatus(displayError(err), 'error'));
+  };
+
+  const loadGenerationIntoEditor = (generation: PromptGeneration) => {
+    setGeneratedJson(JSON.stringify(generation.generatedJson, null, 2));
+    setLatestGenerationId(generation.id);
+    setSaved(true);
+    updateStatus(`Loaded ${promptGenerationDisplayTitle(generation)}`, 'success');
+  };
 
   const syncSessionName = async (workingSession: PromptSession) => {
     const requestedName = jsonName.trim();
@@ -256,7 +400,7 @@ export default function PromptGeneratorPage() {
   const analyzeFile = async (file: File) => {
     const fileSignature = `${file.name}:${file.size}:${file.lastModified}`;
 
-    if (activeAnalyzeSignatureRef.current === fileSignature) {
+    if (isAnalyzing && activeAnalyzeSignatureRef.current === fileSignature) {
       return;
     }
 
@@ -296,10 +440,103 @@ export default function PromptGeneratorPage() {
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextFile = event.target.files?.[0] ?? null;
     setSelectedFile(nextFile);
+    setReferenceLinkInput('');
+    setReferenceLinkPreview(null);
 
     if (nextFile) {
       void analyzeFile(nextFile);
     }
+  };
+
+  const analyzeReferenceLink = async (imageUrl: string) => {
+    const trimmedUrl = imageUrl.trim();
+
+    if (!isLikelyImageUrl(trimmedUrl)) {
+      updateStatus('Enter a valid http or https image link.', 'error');
+      return;
+    }
+
+    const linkSignature = `link:${trimmedUrl}`;
+
+    if (isAnalyzing && activeAnalyzeSignatureRef.current === linkSignature) {
+      return;
+    }
+
+    activeAnalyzeSignatureRef.current = linkSignature;
+    setIsAnalyzing(true);
+    setSaved(false);
+    setSelectedFile(null);
+    setReferenceLinkPreview(trimmedUrl);
+    updateStatus('Fetching and analyzing image from link...', 'info');
+
+    try {
+      const workingSession = await ensureSession('image');
+      const response = await promptService.analyzeImage(workingSession.id, {
+        image: { imageUrl: trimmedUrl },
+        promptText: promptText.trim() || undefined,
+      });
+      const result = response.data.data;
+
+      setSession(result.session);
+      setCreativeContext(result.session.creativeContext);
+      appendMessages([result.assistantMessage]);
+      setGeneratedJson('');
+      setLatestGenerationId(null);
+      updateStatus('Image link analyzed and creative context updated', 'success');
+    } catch (error) {
+      setReferenceLinkPreview(null);
+      updateStatus(displayError(error), 'error');
+    } finally {
+      activeAnalyzeSignatureRef.current = null;
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleReferenceLinkSubmit = () => {
+    void analyzeReferenceLink(referenceLinkInput);
+  };
+
+  const addSupportingImageLink = async (imageUrl: string) => {
+    const trimmedUrl = imageUrl.trim();
+
+    if (!isLikelyImageUrl(trimmedUrl)) {
+      updateStatus('Enter a valid http or https image link.', 'error');
+      return;
+    }
+
+    setIsUploadingAssets(true);
+    setSaved(false);
+    updateStatus('Adding supporting image from link...', 'info');
+
+    try {
+      const workingSession = await ensureSession(hasReferenceImage ? 'mixed' : 'text');
+      const response = await promptService.addAsset(workingSession.id, {
+        assetRole: 'supporting_reference',
+        image: { imageUrl: trimmedUrl },
+      });
+      const result = response.data.data;
+      setSession(result.session);
+      setAdditionalAssets((current) => [
+        {
+          id: result.asset.id,
+          name: result.asset.fileName,
+          url: result.asset.url ?? trimmedUrl,
+        },
+        ...current,
+      ]);
+      setGeneratedJson('');
+      setLatestGenerationId(null);
+      setSupportingLinkInput('');
+      updateStatus('Supporting image link attached to this JSON session', 'success');
+    } catch (error) {
+      updateStatus(displayError(error), 'error');
+    } finally {
+      setIsUploadingAssets(false);
+    }
+  };
+
+  const handleSupportingLinkSubmit = () => {
+    void addSupportingImageLink(supportingLinkInput);
   };
 
   const sendPromptToSession = async (workingSession: PromptSession, content: string) => {
@@ -340,7 +577,7 @@ export default function PromptGeneratorPage() {
     updateStatus('Sending message...', 'info');
 
     try {
-      const workingSession = await ensureSession(selectedFile ? 'mixed' : 'text');
+      const workingSession = await ensureSession(hasReferenceImage ? 'mixed' : 'text');
       await sendPromptToSession(workingSession, trimmedPrompt);
       setPromptText('');
     } catch (error) {
@@ -352,12 +589,22 @@ export default function PromptGeneratorPage() {
   };
 
   const handleAnalyze = () => {
-    if (!selectedFile) {
-      updateStatus('Upload an image first, or use Generate JSON for chat-only mode.', 'error');
+    if (selectedFile) {
+      void analyzeFile(selectedFile);
       return;
     }
 
-    void analyzeFile(selectedFile);
+    const imageLink = referenceLinkInput.trim() || referenceLinkPreview?.trim();
+
+    if (imageLink) {
+      void analyzeReferenceLink(imageLink);
+      return;
+    }
+
+    updateStatus(
+      'Upload a reference image, paste an image link and use Use link, or use Generate JSON for chat-only mode.',
+      'error',
+    );
   };
 
   const handleAdditionalFilesChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -373,7 +620,7 @@ export default function PromptGeneratorPage() {
     updateStatus('Uploading supporting images...', 'info');
 
     try {
-      const workingSession = await ensureSession('mixed');
+      const workingSession = await ensureSession(hasReferenceImage ? 'mixed' : 'text');
       const uploadedAssets: SupportingAssetPreview[] = [];
 
       for (const file of files) {
@@ -420,7 +667,7 @@ export default function PromptGeneratorPage() {
     updateStatus('Generating JSON...', 'info');
 
     try {
-      let workingSession = await ensureSession(selectedFile ? 'mixed' : 'text');
+      let workingSession = await ensureSession(hasReferenceImage ? 'mixed' : 'text');
       const trimmedPrompt = promptText.trim();
 
       if (trimmedPrompt) {
@@ -429,6 +676,7 @@ export default function PromptGeneratorPage() {
       }
 
       const response = await promptService.generateSessionJson(workingSession.id, {
+        folderId: saveFolderId(activeFolderId),
         outputOptions: {
           aspectRatio:
             typeof creativeContext.aspectRatio === 'string'
@@ -450,7 +698,14 @@ export default function PromptGeneratorPage() {
       setLatestGenerationId(result.generation.id);
       setSaved(true);
       window.dispatchEvent(new CustomEvent('prompt-generation-saved'));
-      updateStatus(`Generated JSON v${result.generation.versionNumber} saved to database`, 'success');
+      refreshFolderGenerations();
+      const folderName = folders.find((folder) => folder.id === activeFolderId)?.name;
+      updateStatus(
+        folderName
+          ? `Generated JSON v${result.generation.versionNumber} saved to "${folderName}"`
+          : `Generated JSON v${result.generation.versionNumber} saved to database`,
+        'success',
+      );
     } catch (error) {
       updateStatus(displayError(error), 'error');
     } finally {
@@ -476,14 +731,28 @@ export default function PromptGeneratorPage() {
   };
 
   const handleSave = () => {
-    setSaved(true);
-    window.dispatchEvent(new CustomEvent('prompt-generation-saved'));
-    updateStatus(
-      latestGenerationId
-        ? 'JSON is saved to database and available in Creative Generator'
-        : 'Generate JSON first to save this session to database',
-      latestGenerationId ? 'success' : 'info',
-    );
+    if (!latestGenerationId) {
+      updateStatus('Generate JSON first to save this session to database', 'info');
+      return;
+    }
+
+    const targetFolderId = saveFolderId(activeFolderId);
+
+    promptJsonFoldersService
+      .assignGeneration(latestGenerationId, targetFolderId)
+      .then(() => {
+        setSaved(true);
+        window.dispatchEvent(new CustomEvent('prompt-generation-saved'));
+        refreshFolderGenerations();
+        const folderName = folders.find((folder) => folder.id === activeFolderId)?.name;
+        updateStatus(
+          folderName
+            ? `JSON saved to folder "${folderName}" and available in Creative Generator`
+            : 'JSON saved to database and available in Creative Generator',
+          'success',
+        );
+      })
+      .catch((err) => updateStatus(displayError(err), 'error'));
   };
 
   return (
@@ -517,13 +786,49 @@ export default function PromptGeneratorPage() {
             />
 
             <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-              <Upload
-                accept="image/*"
-                className="min-h-52"
-                description="PNG, JPG, or WebP reference image"
-                label={isAnalyzing ? 'Analyzing Image' : 'Upload Image'}
-                onChange={handleFileChange}
-              />
+              <div className="space-y-3">
+                <Upload
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  className="min-h-44"
+                  description="PNG, JPG, or WebP reference image"
+                  label={isAnalyzing ? 'Analyzing Image' : 'Upload Image'}
+                  onChange={handleFileChange}
+                />
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-950/50">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    Or image link
+                  </p>
+                  <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      className="h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                      placeholder="https://…/reference.png"
+                      type="url"
+                      value={referenceLinkInput}
+                      onChange={(event) => setReferenceLinkInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          handleReferenceLinkSubmit();
+                        }
+                      }}
+                    />
+                    <Button
+                      className="h-10 shrink-0"
+                      isLoading={isAnalyzing}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                      onClick={handleReferenceLinkSubmit}
+                    >
+                      <Link2 aria-hidden="true" className="h-4 w-4" />
+                      Use link
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    Direct PNG, JPG, or WebP URLs (including Supabase Storage links).
+                  </p>
+                </div>
+              </div>
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
                 <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
@@ -536,12 +841,12 @@ export default function PromptGeneratorPage() {
                     <span
                       aria-hidden="true"
                       className={
-                        selectedFile
+                        hasReferenceImage
                           ? 'h-2 w-2 rounded-full bg-emerald-500'
                           : 'h-2 w-2 rounded-full bg-slate-400'
                       }
                     />
-                    {selectedFile ? 'Uploaded' : 'Image first'}
+                    {selectedFile ? 'Uploaded' : referenceLinkPreview ? 'Linked' : 'Image first'}
                   </span>
                 </div>
                 {previewUrl ? (
@@ -589,14 +894,47 @@ export default function PromptGeneratorPage() {
               </div>
 
               <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-                <Upload
-                  accept="image/*"
-                  className="min-h-36"
-                  description="Logo, product, packaging, or extra reference images"
-                  label={isUploadingAssets ? 'Uploading Images' : 'Add More Images'}
-                  multiple
-                  onChange={handleAdditionalFilesChange}
-                />
+                <div className="space-y-3">
+                  <Upload
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                    className="min-h-28"
+                    description="Logo, product, packaging, or extra reference images"
+                    label={isUploadingAssets ? 'Uploading Images' : 'Add More Images'}
+                    multiple
+                    onChange={handleAdditionalFilesChange}
+                  />
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-950/50">
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                      Or supporting image link
+                    </p>
+                    <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        className="h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                        placeholder="https://…/logo.webp"
+                        type="url"
+                        value={supportingLinkInput}
+                        onChange={(event) => setSupportingLinkInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            handleSupportingLinkSubmit();
+                          }
+                        }}
+                      />
+                      <Button
+                        className="h-10 shrink-0"
+                        isLoading={isUploadingAssets}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                        onClick={handleSupportingLinkSubmit}
+                      >
+                        <Link2 aria-hidden="true" className="h-4 w-4" />
+                        Add link
+                      </Button>
+                    </div>
+                  </div>
+                </div>
                 <div className="min-h-36 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
                   {additionalAssets.length ? (
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -742,6 +1080,156 @@ export default function PromptGeneratorPage() {
                   {saved ? ' · saved' : ''}
                 </p>
               </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/50">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+                  JSON folders
+                </p>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setIsFolderFormOpen((open) => !open);
+                    setNewFolderName('');
+                  }}
+                >
+                  <FolderPlus aria-hidden="true" className="h-3.5 w-3.5" />
+                  New folder
+                </Button>
+              </div>
+
+              {isFolderFormOpen ? (
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    autoFocus
+                    className="h-9 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                    maxLength={80}
+                    placeholder="Folder name, e.g. Real Estate Q1"
+                    value={newFolderName}
+                    onChange={(event) => setNewFolderName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        handleCreateFolder();
+                      }
+
+                      if (event.key === 'Escape') {
+                        setIsFolderFormOpen(false);
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      className="h-9"
+                      isLoading={isSavingFolder}
+                      size="sm"
+                      type="button"
+                      onClick={handleCreateFolder}
+                    >
+                      Create
+                    </Button>
+                    <Button
+                      className="h-9"
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setIsFolderFormOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {foldersError ? (
+                <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  {foldersError}
+                </p>
+              ) : null}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  className={cn(
+                    'inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition',
+                    activeFolderId === allFolderId
+                      ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300',
+                  )}
+                  type="button"
+                  onClick={() => setActiveFolderId(allFolderId)}
+                >
+                  All JSON
+                </button>
+                <button
+                  className={cn(
+                    'inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition',
+                    activeFolderId === unsortedFolderId
+                      ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300',
+                  )}
+                  type="button"
+                  onClick={() => setActiveFolderId(unsortedFolderId)}
+                >
+                  Unsorted
+                  <span className="opacity-70">{unsortedJsonCount}</span>
+                </button>
+                {folders.map((folder) => {
+                  const isActive = folder.id === activeFolderId;
+
+                  return (
+                    <div className="inline-flex items-center gap-0.5" key={folder.id}>
+                      <button
+                        className={cn(
+                          'inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition',
+                          isActive
+                            ? 'border-brand-600 bg-brand-600 text-white'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300',
+                        )}
+                        type="button"
+                        onClick={() => setActiveFolderId(folder.id)}
+                      >
+                        {folder.name}
+                        <span className="opacity-70">{folder.jsonCount}</span>
+                      </button>
+                      <button
+                        aria-label={`Delete folder ${folder.name}`}
+                        className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
+                        type="button"
+                        onClick={() => handleDeleteFolder(folder)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {folderGenerations.length > 0 ? (
+                <ul className="mt-3 max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950">
+                  {folderGenerations.slice(0, 12).map((generation) => (
+                    <li key={generation.id}>
+                      <button
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+                        type="button"
+                        onClick={() => loadGenerationIntoEditor(generation)}
+                      >
+                        <FileJson className="h-3.5 w-3.5 shrink-0 text-brand-600" />
+                        <span className="truncate">{promptGenerationDisplayTitle(generation)}</span>
+                        <span className="shrink-0 text-slate-400">v{generation.versionNumber}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                {activeFolderId !== allFolderId && activeFolderId !== unsortedFolderId
+                  ? 'Generate JSON or Save to store presets in the selected folder.'
+                  : 'Select a folder to file new JSON presets, or use Unsorted.'}
+              </p>
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-2">

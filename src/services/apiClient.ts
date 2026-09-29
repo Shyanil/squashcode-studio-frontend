@@ -2,7 +2,7 @@ import axios from 'axios';
 
 import { supabaseClient } from '@/services/supabaseClient';
 
-const deployedApiBaseUrl = 'https://squashcode-studio-backend.onrender.com/api';
+const deployedApiBaseUrl = 'https://squashcode-studio-backend.shyanilsquashcode.workers.dev/api';
 const localApiBaseUrl = 'http://localhost:4000/api';
 
 function isStaleProductionApiUrl(url: string) {
